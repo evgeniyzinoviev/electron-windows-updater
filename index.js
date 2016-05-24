@@ -1,6 +1,6 @@
 'use strict'
 
-const app = require('app')
+const app = require('electron').app
 const temp = require('temp')
 const os = require('os')
 const fs = require('fs')
