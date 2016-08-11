@@ -9,7 +9,9 @@ const EventEmitter = require('events').EventEmitter
 const https = require('https')
 const parseUrl = require('url').parse
 const cp = require('child_process')
+const GetSystem32Path = require('get-system32-path').GetSystem32Path
 
+const CSCRIPT = GetSystem32Path() + '\\cscript.exe'
 const updater = new EventEmitter()
 let feedUrl, downloadPath, downloading, updateData, unpackDir
 
@@ -32,7 +34,7 @@ function execute(cmd, args, opts) {
     child.on('exit', function(code) {
       if (code != 0) {
         reject('"' + cmd + '" returned ' + code +
-               "\nstdout: " + Buffer.concat(stdout).toString('utf-8') + 
+               "\nstdout: " + Buffer.concat(stdout).toString('utf-8') +
                "\nstderr: " + Buffer.concat(stderr).toString('utf-8')
               )
       } else {
@@ -66,7 +68,7 @@ function download(src, dst) {
         file.close(resolve)
       })
     })
-    
+
     request.on('error', function(error) {
       fs.unlink(dst)
       reject(error)
@@ -82,7 +84,7 @@ function unpack() {
   .then(dir => {
     unpackDir = dir
     let script = path.join(__dirname, 'unzip.vbs')
-    return execute('cscript', [/*'//B',*/ script, downloadPath, unpackDir]).then(() => dir)
+    return execute(CSCRIPT, [/*'//B',*/ script, downloadPath, unpackDir]).then(() => dir)
   })
 }
 
@@ -181,10 +183,10 @@ updater.quitAndInstall = function() {
   let exe = process.execPath
   let src = unpackDir
   let dst = path.dirname(process.execPath)
-  
+
   let args = [script, bat, exe, src, dst]
 
-  cp.spawn('cscript', args, {
+  cp.spawn(CSCRIPT, args, {
     detached: true,
     stdio: ['ignore', 'ignore', 'ignore']
   }).unref()
