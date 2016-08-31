@@ -184,7 +184,7 @@ updater.quitAndInstall = function() {
   let src = unpackDir
   let dst = path.dirname(process.execPath)
 
-  let args = [script, bat, exe, src, dst]
+  let args = [script, bat, exe, src, dst, GetSystem32Path()]
 
   cp.spawn(CSCRIPT, args, {
     detached: true,
