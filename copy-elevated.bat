@@ -10,8 +10,10 @@ xcopy /e /y /i %src% %dst%
 rmdir /s /q %src%
 
 if [%sysroot%] NEQ [] (
-  start "" %sysroot%\ie4uinit.exe -ClearIconCache
-  start "" %sysroot%\ie4uinit.exe -show
+  if exist %sysroot%\ie4uinit.exe (
+    start "" %sysroot%\ie4uinit.exe -ClearIconCache
+    start "" %sysroot%\ie4uinit.exe -show
+  )
 )
 
 start "" %exe%
