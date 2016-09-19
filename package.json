@@ -23,6 +23,6 @@
     "temp": "^0.8.3"
   },
   "optionalDependencies": {
-    "get-system32-path": "https://github.com/gch1p/get-system32-path/tarball/master"
+    "get-system32-path": "https://github.com/gch1p/get-system32-path/tarball/noautobuild"
   }
 }
