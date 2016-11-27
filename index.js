@@ -52,7 +52,7 @@ class Updater extends EventEmitter {
 
   checkForUpdates() {
     if (this.downloading) {
-      console.log('[electron-windows-updater] downloading in process, skip checking')
+      _log('downloading in process, skip checking')
       return
     }
 
@@ -80,19 +80,19 @@ class Updater extends EventEmitter {
       // Download
       this.downloadPath = temp.path({ suffix: '.zip' })
       this.downloading = true
+      _log('downloading ' + this.updateData.url + ' to ' + this.downloadPath)
       return download(this.updateData.url, this.downloadPath)
     })
     .then(() => {
-      console.log('[electron-windows-updater] unpacking...')
       return mkTempDir()
       .then(dir => {
-        console.log('[electron-windows-updater] unpacking to ' + dir)
+        _log('unpacking to ' + dir)
         this.unpackDir = dir
         return pExtractZip(this.downloadPath, dir)
       })
     })
     .then(() => {
-      console.log('[electron-windows-updater] done')
+      _log('an update has been successfully downloaded and unpacked')
       this.emit('update-downloaded', this.updateData)
     })
     .catch(e => {
@@ -167,8 +167,14 @@ function mkTempDir() {
  */
 function download(src, dst) {
   return new Promise(function(resolve, reject) {
-    let file = fs.createWriteStream(dst)
-    let request = https.get(src, function(response) {
+    let module = parseUrl(src).protocol == 'https:' ? https : http
+    let request = module.get(src, function(response) {
+      if (response.statusCode != 200) {
+        reject(new Error("HTTP status code is " + response.statusCode))
+        return
+      }
+
+      let file = fs.createWriteStream(dst)
       response.pipe(file)
       file.on('finish', function() {
         file.close(resolve)
@@ -215,6 +221,11 @@ function request(url) {
       reject(error)
     })
   })
+}
+
+function _log(...args) {
+  args.unshift('<electron-windows-updater>')
+  console.log.apply(console, args)
 }
 
 module.exports = new Updater()

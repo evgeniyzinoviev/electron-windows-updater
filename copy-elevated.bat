@@ -7,8 +7,6 @@ set sysroot=%4
 
 ping -n 2 127.0.0.1
 
-for %%F in ("%dst%\*") do if not exist "%src%\%%~nxF" del "%%~fF"
-
 xcopy /e /y /i "%src%" "%dst%"
 set xcopy_result=%errorlevel%
 
