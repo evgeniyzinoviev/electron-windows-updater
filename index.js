@@ -6,14 +6,117 @@ const os = require('os')
 const fs = require('fs')
 const path = require('path')
 const EventEmitter = require('events').EventEmitter
+const http = require('http')
 const https = require('https')
 const parseUrl = require('url').parse
-const cp = require('child_process')
-const GetSystem32Path = require('get-system32-path').GetSystem32Path
+const child_process = require('child_process')
+const extractZip = require('extract-zip')
 
+const GetSystem32Path = require('get-system32-path').GetSystem32Path
 const CSCRIPT = GetSystem32Path() + '\\cscript.exe'
-const updater = new EventEmitter()
-let feedUrl, downloadPath, downloading, updateData, unpackDir
+
+class Updater extends EventEmitter {
+  constructor() {
+    super()
+    this.feedURL = null
+    this.downloadPath = null
+    this.downloading = false
+    this.updateData = null
+    this.unpackDir = null
+  }
+
+  /**
+   * @param {String} url
+   */
+  setFeedURL(url) {
+    this.feedURL = url
+  }
+
+  quitAndInstall() {
+    let script = path.join(__dirname, 'run-elevated.vbs')
+    let bat = path.join(__dirname, 'copy-elevated.bat')
+    let exe = process.execPath
+    let src = this.unpackDir
+    let dst = path.dirname(process.execPath)
+
+    let args = [script, bat, exe, src, dst, GetSystem32Path()]
+
+    child_process.spawn(CSCRIPT, args, {
+      detached: true,
+      stdio: ['ignore', 'ignore', 'ignore']
+    }).unref()
+
+    app.quit()
+  }
+
+  checkForUpdates() {
+    if (this.downloading) {
+      console.log('[electron-windows-updater] downloading in process, skip checking')
+      return
+    }
+
+    if (!this.feedURL) {
+      throw new Error('feedURL is not specified')
+    }
+
+    request(this.feedURL)
+    .then(response => {
+      if (response.statusCode != 200 && response.statusCode != 204) throw new Error('invalid status code: ' + response.statusCode)
+      if (response.statusCode == 204) {
+        this.emit('update-not-available')
+        return
+      }
+
+      let data = JSON.parse(response.body)
+      if (parseUrl(data.url).protocol != 'https:') throw new Error('update url must be https')
+
+      this.updateData = data
+      this.emit('update-available')
+    })
+    .then(() => {
+      // Download
+      this.downloadPath = temp.path({ suffix: '.zip' })
+      this.downloading = true
+      return download(this.updateData.url, this.downloadPath)
+    })
+    .then(() => {
+      console.log('[electron-windows-updater] unpacking...')
+      return mkTempDir()
+      .then(dir => {
+        console.log('[electron-windows-updater] unpacking to ' + dir)
+        this.unpackDir = dir
+        return pExtractZip(this.downloadPath, dir)
+      })
+    })
+    .then(() => {
+      console.log('[electron-windows-updater] done')
+      this.emit('update-downloaded', this.updateData)
+    })
+    .catch(e => {
+      this.downloadPath = null
+      this.updateData = null
+      this.unpackDir = null
+      this.downloading = false
+      console.error('[electron-windows-updater]', e)
+      this.emit('error', e)
+    })
+  }
+}
+
+/**
+ * @return {Promise}
+ */
+function pExtractZip(src, dst) {
+  return new Promise(function(resolve, reject) {
+    let noAsar = process.noAsar
+    process.noAsar = true
+    extractZip(src, { dir: dst }, function (err) {
+      process.noAsar = noAsar
+      !err ? resolve() : reject(err)
+    })
+  })
+}
+
 
 /**
  * @param {String} cmd
@@ -23,7 +126,7 @@ let feedUrl, downloadPath, downloading, updateData, unpackDir
  */
 function execute(cmd, args, opts) {
   return new Promise(function(resolve, reject) {
-    let child = cp.spawn(cmd, args, opts)
+    let child = child_process.spawn(cmd, args, opts)
     let stderr = [], stdout = []
     child.stderr.on('data', function(data) {
       stderr.push(data)
@@ -77,18 +180,6 @@ function download(src, dst) {
 }
 
 /**
- * @return {Promise} a promise that returns directory
- */
-function unpack() {
-  return mkTempDir()
-  .then(dir => {
-    unpackDir = dir
-    let script = path.join(__dirname, 'unzip.vbs')
-    return execute(CSCRIPT, [/*'//B',*/ script, downloadPath, unpackDir]).then(() => dir)
-  })
-}
-
-/**
  * @param {String} url
  * @return {Promise}
  */
@@ -113,6 +204,7 @@ function request(url) {
           statusCode: res.statusCode,
           body: Buffer.concat(chunks).toString('utf-8')
         })
+        chunks = undefined
       })
     })
     req.end()
@@ -122,76 +214,4 @@ function request(url) {
   })
 }
 
-/**
- * @param {String} url
- */
-updater.setFeedURL = function(url) {
-  feedUrl = url
-}
-
-updater.checkForUpdates = function() {
-  if (downloading) {
-    console.log('[windows-updater] downloading in process, skip checking')
-    return
-  }
-  if (!feedUrl) throw new Error('seedURL is not specified')
-
-  request(feedUrl)
-  .then(response => {
-    if (response.statusCode != 200 && response.statusCode != 204) throw new Error('invalid status code: ' + response.statusCode)
-    if (response.statusCode == 204) {
-      this.emit('update-not-available')
-      return
-    }
-
-    let data = JSON.parse(response.body)
-    if (parseUrl(data.url).protocol != 'https:') throw new Error('update url must be https')
-
-    updateData = data
-    this.emit('update-available')
-
-    return data
-  })
-  .then(() => {
-    // Download
-    downloadPath = temp.path({suffix: '.zip'})
-    downloading = true
-    return download(updateData.url, downloadPath)
-  })
-  .then(() => {
-    console.log('[windows-updater] unpacking')
-    return unpack()
-  })
-  .then((dir) => {
-    console.log('[windows-updater] done')
-    unpackDir = dir
-    this.emit('update-downloaded', updateData)
-  })
-  .catch(e => {
-    downloadPath = null
-    updateData = null
-    unpackDir = null
-    downloading = false
-    console.error('[windows-updater]', e)
-    this.emit('error', e)
-  })
-}
-
-updater.quitAndInstall = function() {
-  let script = path.join(__dirname, 'run-elevated.vbs')
-  let bat = path.join(__dirname, 'copy-elevated.bat')
-  let exe = process.execPath
-  let src = unpackDir
-  let dst = path.dirname(process.execPath)
-
-  let args = [script, bat, exe, src, dst, GetSystem32Path()]
-
-  cp.spawn(CSCRIPT, args, {
-    detached: true,
-    stdio: ['ignore', 'ignore', 'ignore']
-  }).unref()
-
-  app.quit()
-}
-
-module.exports = updater
+module.exports = new Updater()
