@@ -81,7 +81,7 @@ class Updater extends EventEmitter {
       this.downloadPath = temp.path({ suffix: '.zip' })
       this.downloading = true
       _log('downloading ' + this.updateData.url + ' to ' + this.downloadPath)
-      return download(this.updateData.url, this.downloadPath)
+      return this._download(this.updateData.url, this.downloadPath)
     })
     .then(() => {
       return mkTempDir()
@@ -102,6 +102,50 @@ class Updater extends EventEmitter {
       this.downloading = false
       console.error('[electron-windows-updater]', e)
       this.emit('error', e)
+    })
+  }
+
+  /**
+   * @param {String} src
+   * @param {String} dst
+   * @return {Promise}
+   */
+  _download(src, dst) {
+    const PROGRESS_PERIOD = 500
+    return new Promise((resolve, reject) => {
+      let module = parseUrl(src).protocol == 'https:' ? https : http
+      let request = module.get(src, response => {
+        if (response.statusCode != 200) {
+          reject(new Error("HTTP status code is " + response.statusCode))
+          return
+        }
+
+        let file = fs.createWriteStream(dst)
+        let downloaded = 0
+        let progressTs = 0
+
+        response.pipe(file)
+
+        file.on('finish', () => {
+          this.emit('download-progress', 100)
+          response.unpipe()
+          resolve()
+        })
+
+        response.on('data', buf => {
+          downloaded += buf.length
+          let now = Date.now()
+          if (now - progressTs > PROGRESS_PERIOD) {
+            progressTs = now
+            this.emit('download-progress', downloaded / this.updateData.size * 100)
+          }
+        })
+      })
+
+      request.on('error', function(error) {
+        fs.unlink(dst)
+        reject(error)
+      })
     })
   }
 }
@@ -161,32 +205,6 @@ function mkTempDir() {
   })
 }
 
-/**
- * @param {String} src
- * @param {String} dst
- */
-function download(src, dst) {
-  return new Promise(function(resolve, reject) {
-    let module = parseUrl(src).protocol == 'https:' ? https : http
-    let request = module.get(src, function(response) {
-      if (response.statusCode != 200) {
-        reject(new Error("HTTP status code is " + response.statusCode))
-        return
-      }
-
-      let file = fs.createWriteStream(dst)
-      response.pipe(file)
-      file.on('finish', function() {
-        file.close(resolve)
-      })
-    })
-
-    request.on('error', function(error) {
-      fs.unlink(dst)
-      reject(error)
-    })
-  })
-}
 
 /**
  * @param {String} url
