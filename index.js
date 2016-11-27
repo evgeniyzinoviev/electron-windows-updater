@@ -91,6 +91,7 @@ class Updater extends EventEmitter {
         return pExtractZip(this.downloadPath, dir)
       })
     })
+    .then(() => punlink(this.downloadPath, true))
     .then(() => {
       _log('an update has been successfully downloaded and unpacked')
       this.emit('update-downloaded', this.updateData)
@@ -237,6 +238,18 @@ function request(url) {
     req.end()
     req.on('error', function(error) {
       reject(error)
+    })
+  })
+}
+
+/**
+ * @param {String} path
+ * @return {Promise}
+ */
+function punlink(path, ignoreErrors = false) {
+  return new Promise(function(resolve, reject) {
+    fs.unlink(path, function(e) {
+      e && !ignoreErrors ? reject(e) : resolve()
     })
   })
 }
