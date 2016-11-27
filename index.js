@@ -23,6 +23,7 @@ class Updater extends EventEmitter {
     this.downloading = false
     this.updateData = null
     this.unpackDir = null
+    this.allowHttp = false
   }
 
   /**
@@ -68,7 +69,9 @@ class Updater extends EventEmitter {
       }
 
       let data = JSON.parse(response.body)
-      if (parseUrl(data.url).protocol != 'https:') throw new Error('update url must be https')
+      if (!this.allowHttp && parseUrl(data.url).protocol != 'https:') {
+        throw new Error('update url must be https')
+      }
 
       this.updateData = data
       this.emit('update-available')
