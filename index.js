@@ -11,6 +11,8 @@ const https = require('https')
 const parseUrl = require('url').parse
 const child_process = require('child_process')
 const extractZip = require('extract-zip')
+const util = require('util')
+const rimraf = require('rimraf')
 
 const GetSystem32Path = require('get-system32-path').GetSystem32Path
 const CSCRIPT = GetSystem32Path() + '\\cscript.exe'
@@ -24,6 +26,7 @@ class Updater extends EventEmitter {
     this.updateData = null
     this.unpackDir = null
     this.allowHttp = false
+    this.exeName = null
   }
 
   /**
@@ -33,14 +36,25 @@ class Updater extends EventEmitter {
     this.feedURL = url
   }
 
+  /**
+   * @param {String} name
+   */
+  setExecutableName(name) {
+    this.exeName = name
+  }
+
   quitAndInstall() {
     let script = path.join(__dirname, 'run-elevated.vbs')
-    let bat = path.join(__dirname, 'copy-elevated.bat')
-    let exe = process.execPath
-    let src = this.unpackDir
-    let dst = path.dirname(process.execPath)
 
-    let args = [script, bat, exe, src, dst, GetSystem32Path()]
+    let args = [
+      script,
+      path.join(this.unpackDir, this.exeName), // new exe path
+
+      path.dirname(process.execPath), // destination dir
+      this.exeName // executable to run after install
+    ]
+
+    fileLog.write('quitAndInstall(); running ' + CSCRIPT + ' ' + args.join(' '))
 
     child_process.spawn(CSCRIPT, args, {
       detached: true,
@@ -151,9 +165,118 @@ class Updater extends EventEmitter {
   }
 }
 
+const INSTALLER_TASK_ARGS_COUNT = {
+  install: 2,
+  'post-install': 2
+}
+const INSTALLER_PREFIX = '--ewu-'
+
+class Installer extends EventEmitter {
+  constructor() {
+    super()
+    this.copyFailed = false
+  }
+
+  process() {
+    let task = null, taskArgs = []
+    for (let i = 1; i < process.argv.length; i++) {
+      let a = process.argv[i]
+      if (!a.startsWith(INSTALLER_PREFIX)) continue
+
+      task = a.substr(INSTALLER_PREFIX.length)
+      if (INSTALLER_TASK_ARGS_COUNT[task] === undefined) continue
+
+      let argsCount = INSTALLER_TASK_ARGS_COUNT[task]
+      if (argsCount) {
+        taskArgs = process.argv.slice(i+1, i+1+argsCount)
+      }
+      break
+    }
+
+    if (task === null) {
+      return false
+    }
+
+    fileLog.write('Installer.process() argv:', process.argv.join(' '))
+
+    switch (task) {
+      case 'install': {
+        let [ dst, exeName ] = taskArgs
+        let src = path.dirname(process.execPath)
+
+        this._install(src, dst, exeName)
+        return true
+      }
+
+      case 'post-install': {
+        this._postInstall(taskArgs[0])
+        if (parseInt(taskArgs[1]) == 0) {
+          this.copyFailed = true
+        }
+        break
+      }
+    }
+  }
+
+  _install(src, dst, exeName) {
+    fileLog.write('Installer._install()', src, dst)
+
+    let copyOk = true
+
+    this._copy(src, dst)
+    .then(result => {
+      copyOk = result
+    })
+    .then(() => this._clearIconCache())
+    .then(() => this._launchApp(path.join(dst, exeName), src, copyOk))
+  }
+
+  _copy(src, dst) {
+    let xcopyPath = path.join(GetSystem32Path(), 'xcopy.exe')
+    return pexecute(xcopyPath, ['/e', '/y', '/i', src, dst])
+    .then(() => true)
+    .catch(err => {
+      fileLog.write('Installer._copy("' + src + '", "' + dst + '") failed ('+xcopyPath+'):', err)
+      return false
+    })
+  }
+
+  _clearIconCache() {
+    const sysRoot = GetSystem32Path()
+    return pexecute(path.join(sysRoot, 'ie4uinit.exe'), ['-ClearIconCache'])
+      .then(() => pexecute(path.join(sysRoot, 'ie4uinit.exe'), ['-show']))
+  }
+
+  _launchApp(path, tempDir, success) {
+    this.emit('done')
+
+    fileLog.write('Installer._launchApp() path:', path)
+
+    child_process.spawn(path, ['--ewu-post-install', tempDir, success ? 1 : 0], {
+      detached: true,
+      stdio: ['ignore', 'ignore', 'ignore']
+    }).unref()
+
+    app.exit()
+  }
+
+  _postInstall(dir) {
+    rimraf(dir, function(err) {
+      if (!err) {
+        fileLog.write('Installer._postInstall() done')
+      } else {
+        fileLog.write('Installer._postInstall() error while deleting ' + dir + ':', err)
+      }
+    })
+  }
+}
+
+
+
 /**
- * @return {Promise}
+ * Utils
  */
+
 function pExtractZip(src, dst) {
   return new Promise(function(resolve, reject) {
     let noAsar = process.noAsar
@@ -165,14 +288,7 @@ function pExtractZip(src, dst) {
   })
 }
 
-
-/**
- * @param {String} cmd
- * @param {Array} args
- * @param {Object} opts
- * @return {Promise}
- */
-function execute(cmd, args, opts) {
+function pexecute(cmd, args, opts) {
   return new Promise(function(resolve, reject) {
     let child = child_process.spawn(cmd, args, opts)
     let stderr = [], stdout = []
@@ -195,9 +311,6 @@ function execute(cmd, args, opts) {
   })
 }
 
-/**
- * @return {Promise}
- */
 function mkTempDir() {
   return new Promise(function(resolve, reject) {
     temp.mkdir(null, function(e, path) {
@@ -206,11 +319,6 @@ function mkTempDir() {
   })
 }
 
-
-/**
- * @param {String} url
- * @return {Promise}
- */
 function request(url) {
   return new Promise(function(resolve, reject) {
     let p = parseUrl(url)
@@ -242,14 +350,18 @@ function request(url) {
   })
 }
 
-/**
- * @param {String} path
- * @return {Promise}
- */
 function punlink(path, ignoreErrors = false) {
   return new Promise(function(resolve, reject) {
     fs.unlink(path, function(e) {
       e && !ignoreErrors ? reject(e) : resolve()
+    })
+  })
+}
+
+function pstat(path) {
+  return new Promise(function(resolve, reject) {
+    fs.stat(path, function(err, stats) {
+      err ? reject(err) : resolve(stats)
     })
   })
 }
@@ -259,4 +371,51 @@ function _log(...args) {
   console.log.apply(console, args)
 }
 
-module.exports = new Updater()
+
+class FileLog {
+  constructor(fileName) {
+    this.stream = null
+    this.fileName = 'electron-updater-log.txt'
+  }
+
+  write(...args) {
+    try {
+      if (!this.stream) {
+        let logpath = path.join(app.getPath('temp'), this.fileName)
+        try {
+          let stat = fs.statSync(logpath)
+          if (stat && stat.size > 102400) {
+            fs.unlinkSync(logpath)
+          }
+        } catch (e) {}
+        this.stream = fs.createWriteStream(logpath, { flags: 'a' })
+      }
+
+      let date = new Date()
+      args.unshift('<'+date.getHours()+':'+date.getMinutes()+':'+date.getSeconds()+'>')
+
+      this.stream.write(util.format.apply(null, args) + "\n")
+    } catch (e) {
+      _log(e)
+    }
+  }
+
+  setFileName(n) {
+    this.fileName = n
+  }
+}
+
+const fileLog = new FileLog()
+
+
+module.exports = {
+  updater: new Updater(),
+  installer: new Installer(),
+
+  /**
+   * @param {String} s
+   */
+  setLogFileName(s) {
+    fileLog.setFileName(s)
+  }
+}

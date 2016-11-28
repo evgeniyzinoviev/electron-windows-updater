@@ -1,10 +1,8 @@
 Set Shell = CreateObject("Shell.Application")
 
 Set ArgObj = WScript.Arguments
-bat = ArgObj(0)
-exe = ArgObj(1)
-src = ArgObj(2)
-dst = ArgObj(3)
-sysroot = ArgObj(4)
+exe = ArgObj(0)
+dst = ArgObj(1)
+newexe = ArgObj(2)
 
-Shell.ShellExecute "cmd", "/c """"" & bat & """ """ & exe & """ """ & src & """ """ & dst & """ """ & sysroot & """""", , "runas", 0
+Shell.ShellExecute exe, "--ewu-install """ & dst & """ """ & newexe & """", , "runas", 0

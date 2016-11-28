@@ -1,6 +1,6 @@
 {
   "name": "electron-windows-updater",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "implementation of auto-updater from osx for windows",
   "main": "index.js",
   "scripts": {
@@ -21,6 +21,7 @@
   "homepage": "https://github.com/evgenyzinoviev/electron-windows-updater#readme",
   "dependencies": {
     "extract-zip": "^1.5.0",
+    "rimraf": "^2.5.4",
     "temp": "^0.8.3"
   },
   "optionalDependencies": {
