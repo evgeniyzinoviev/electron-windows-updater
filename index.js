@@ -60,7 +60,7 @@ class Updater extends EventEmitter {
       stdio: ['ignore', 'ignore', 'ignore']
     }).unref()
 
-    app.quit()
+    app.exit()
   }
 
   checkForUpdates() {
@@ -231,7 +231,7 @@ class Installer extends EventEmitter {
 
     let copyOk = true
 
-    this._copy(src, dst)
+    this._copy(src, dst, exeName)
     .then(result => {
       copyOk = result
     })
@@ -243,17 +243,19 @@ class Installer extends EventEmitter {
     })
   }
 
-  _copy(src, dst) {
+  _copy(src, dst, exeName) {
     process.noAsar = true
-    return new Promise(function(resolve, reject) {
-      fs.copy(src, dst, function(err) {
-        if (err) {
-          fileLog.write('Installer._copy("' + src + '", "' + dst + '") failed:', err)
-          resolve(false)
-        } else {
-          resolve(true)
-        }
-      })
+
+    return pcopy(path.join(src, exeName), path.join(dst, exeName))
+    .then(() => pcopy(src, dst, {
+      filter: function(path) {
+        return !path.endsWith(exeName)
+      }
+    }))
+    .then(() => true)
+    .catch(err => {
+      fileLog.write('Installer._copy("' + src + '", "' + dst + '") failed:', err)
+      return false
     })
   }
 
@@ -381,6 +383,14 @@ function pstat(path) {
   return new Promise(function(resolve, reject) {
     fs.stat(path, function(err, stats) {
       err ? reject(err) : resolve(stats)
+    })
+  })
+}
+
+function pcopy(src, dst, opts = {}) {
+  return new Promise(function(resolve, reject) {
+    fs.copy(src, dst, opts, function(err) {
+      !err ? resolve() : reject(err)
     })
   })
 }
