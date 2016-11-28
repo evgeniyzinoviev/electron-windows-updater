@@ -236,9 +236,9 @@ class Installer extends EventEmitter {
       fs.copy(src, dst, function(err) {
         if (err) {
           fileLog.write('Installer._copy("' + src + '", "' + dst + '") failed:', err)
-          reject(err)
+          resolve(false)
         } else {
-          resolve()
+          resolve(true)
         }
       })
     })
