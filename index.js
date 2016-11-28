@@ -3,7 +3,7 @@
 const app = require('electron').app
 const temp = require('temp')
 const os = require('os')
-const fs = require('fs')
+const fs = require('fs-extra')
 const path = require('path')
 const EventEmitter = require('events').EventEmitter
 const http = require('http')
@@ -12,7 +12,6 @@ const parseUrl = require('url').parse
 const child_process = require('child_process')
 const extractZip = require('extract-zip')
 const util = require('util')
-const rimraf = require('rimraf')
 
 const GetSystem32Path = require('get-system32-path').GetSystem32Path
 const CSCRIPT = GetSystem32Path() + '\\cscript.exe'
@@ -232,12 +231,16 @@ class Installer extends EventEmitter {
   }
 
   _copy(src, dst) {
-    let xcopyPath = path.join(GetSystem32Path(), 'xcopy.exe')
-    return pexecute(xcopyPath, ['/e', '/y', '/i', src, dst])
-    .then(() => true)
-    .catch(err => {
-      fileLog.write('Installer._copy("' + src + '", "' + dst + '") failed ('+xcopyPath+'):', err)
-      return false
+    process.noAsar = true
+    return new Promise(function(resolve, reject) {
+      fs.copy(src, dst, function(err) {
+        if (err) {
+          fileLog.write('Installer._copy("' + src + '", "' + dst + '") failed:', err)
+          reject(err)
+        } else {
+          resolve()
+        }
+      })
     })
   }
 
@@ -261,7 +264,7 @@ class Installer extends EventEmitter {
   }
 
   _postInstall(dir) {
-    rimraf(dir, function(err) {
+    fs.remove(dir, function(err) {
       if (!err) {
         fileLog.write('Installer._postInstall() done')
       } else {
