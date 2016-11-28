@@ -203,7 +203,11 @@ class Installer extends EventEmitter {
         let [ dst, exeName ] = taskArgs
         let src = path.dirname(process.execPath)
 
-        this._install(src, dst, exeName)
+        try {
+          this._install(src, dst, exeName)
+        } catch (e) {
+          fileLog.write(e)
+        }
         return true
       }
 
@@ -220,6 +224,11 @@ class Installer extends EventEmitter {
   _install(src, dst, exeName) {
     fileLog.write('Installer._install()', src, dst)
 
+    process.on('uncaughtException', (err) => {
+      fileLog.write(err)
+      app.exit()
+    })
+
     let copyOk = true
 
     this._copy(src, dst)
@@ -227,8 +236,11 @@ class Installer extends EventEmitter {
       copyOk = result
     })
     .then(() => this._clearIconCache())
-    .catch(e => fileLog.write(e))
     .then(() => this._launchApp(path.join(dst, exeName), src, copyOk))
+    .catch(e => {
+      fileLog.write(e)
+      app.exit()
+    })
   }
 
   _copy(src, dst) {
@@ -251,12 +263,12 @@ class Installer extends EventEmitter {
       .then(() => pexecute(path.join(sysRoot, 'ie4uinit.exe'), ['-show']))
   }
 
-  _launchApp(path, tempDir, success) {
+  _launchApp(exe, tempDir, success) {
     this.emit('done')
 
-    fileLog.write('Installer._launchApp() path:', path)
+    fileLog.write('Installer._launchApp() path:', exe)
 
-    child_process.spawn(path, ['--ewu-post-install', tempDir, success ? 1 : 0], {
+    child_process.spawn(exe, ['--ewu-post-install', path.resolve(tempDir), success ? '1' : '0'], {
       detached: true,
       stdio: ['ignore', 'ignore', 'ignore']
     }).unref()
