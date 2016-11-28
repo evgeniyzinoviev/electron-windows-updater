@@ -227,6 +227,7 @@ class Installer extends EventEmitter {
       copyOk = result
     })
     .then(() => this._clearIconCache())
+    .catch(e => fileLog.write(e))
     .then(() => this._launchApp(path.join(dst, exeName), src, copyOk))
   }
 
