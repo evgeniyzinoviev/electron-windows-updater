@@ -277,7 +277,10 @@ class Installer extends EventEmitter {
   }
 
   _postInstall(dir) {
+    let noAsar = process.noAsar
+    process.noAsar = true
     fs.remove(dir, function(err) {
+      process.noAsar = noAsar
       if (!err) {
         fileLog.write('Installer._postInstall() done')
       } else {
