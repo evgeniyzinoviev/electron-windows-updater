@@ -246,7 +246,24 @@ class Installer extends EventEmitter {
   _copy(src, dst, exeName) {
     process.noAsar = true
 
-    return pcopy(path.join(src, exeName), path.join(dst, exeName))
+    const maxTries = 20
+    function tryToCopy(iter = 0) {
+      return pcopy(path.join(src, exeName), path.join(dst, exeName))
+      .then(() => {
+        fileLog.write('_copy exe: succeeded on iteration ' + iter)
+        return true
+      })
+      .catch(err => {
+        fileLog.write('_copy exe: failed on iteration ' + iter)
+        if (iter < maxTries) {
+          return psleep(250).then(() => tryToCopy(iter+1))
+        } else {
+          throw err
+        }
+      })
+    }
+
+    return tryToCopy()
     .then(() => pcopy(src, dst, {
       filter: function(path) {
         return !path.endsWith(exeName)
@@ -392,6 +409,14 @@ function pcopy(src, dst, opts = {}) {
     fs.copy(src, dst, opts, function(err) {
       !err ? resolve() : reject(err)
     })
+  })
+}
+
+function psleep(timeout) {
+  return new Promise(function(resolve, reject) {
+    setTimeout(function() {
+      resolve()
+    }, timeout)
   })
 }
 
