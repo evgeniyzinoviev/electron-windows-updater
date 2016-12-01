@@ -147,11 +147,15 @@ class Updater extends EventEmitter {
         })
 
         response.on('data', buf => {
-          downloaded += buf.length
-          let now = Date.now()
-          if (now - progressTs > PROGRESS_PERIOD) {
-            progressTs = now
-            this.emit('download-progress', downloaded / this.updateData.size * 100)
+          try {
+            downloaded += buf.length
+            let now = Date.now()
+            if (now - progressTs > PROGRESS_PERIOD) {
+              progressTs = now
+              this.emit('download-progress', downloaded / this.updateData.size * 100)
+            }
+          } catch (e) {
+            console.error(e)
           }
         })
       })
