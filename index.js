@@ -13,9 +13,6 @@ const child_process = require('child_process')
 const extractZip = require('extract-zip')
 const util = require('util')
 
-const GetSystem32Path = require('get-system32-path').GetSystem32Path
-const CSCRIPT = GetSystem32Path() + '\\cscript.exe'
-
 class Updater extends EventEmitter {
   constructor() {
     super()
@@ -43,24 +40,7 @@ class Updater extends EventEmitter {
   }
 
   quitAndInstall() {
-    let script = path.join(__dirname, 'run-elevated.vbs')
-
-    let args = [
-      script,
-      path.join(this.unpackDir, this.exeName), // new exe path
-
-      path.dirname(process.execPath), // destination dir
-      this.exeName // executable to run after install
-    ]
-
-    fileLog.write('quitAndInstall(); running ' + CSCRIPT + ' ' + args.join(' '))
-
-    child_process.spawn(CSCRIPT, args, {
-      detached: true,
-      stdio: ['ignore', 'ignore', 'ignore']
-    }).unref()
-
-    app.exit()
+    // override this method
   }
 
   checkForUpdates() {
@@ -168,12 +148,52 @@ class Updater extends EventEmitter {
   }
 }
 
-const INSTALLER_TASK_ARGS_COUNT = {
-  install: 2,
-  'post-install': 2
-}
-const INSTALLER_PREFIX = '--ewu-'
+class WindowsUpdater extends Updater {
+  constructor() {
+    super()
+    this.cscriptPath = path.join(require('get-system32-path').GetSystem32Path(), 'cscript.exe')
+  }
 
+  quitAndInstall() {
+    let script = path.join(__dirname, 'run-elevated.vbs')
+
+    let args = [
+      script,
+      path.join(this.unpackDir, this.exeName), // new exe path
+      path.dirname(process.execPath), // destination dir
+      this.exeName // executable to run after install
+    ]
+
+    fileLog.write('WindowsUpdater::quitAndInstall() running ' + this.cscriptPath + ' ' + args.join(' '))
+
+    child_process.spawn(this.cscriptPath, args, {
+      detached: true,
+      stdio: ['ignore', 'ignore', 'ignore']
+    }).unref()
+
+    app.exit()
+  }
+}
+
+class LinuxUpdater extends Updater {
+  quitAndInstall() {
+    let args = [
+      '--ewu-install',
+      this.unpackDir, // source dir
+    ]
+
+    fileLog.write('LinuxUpdater::quitAndInstall() running ' + process.execPath + ' ' + args.join(' '))
+
+    child_process.spawn(process.execPath, args, {
+      detached: true,
+      stdio: ['ignore', 'ignore', 'ignore']
+    }).unref()
+
+    app.exit()
+  }
+}
+
+const INSTALLER_PREFIX = '--ewu-'
 class Installer extends EventEmitter {
   constructor() {
     super()
@@ -181,84 +201,111 @@ class Installer extends EventEmitter {
   }
 
   process() {
-    let task = null, taskArgs = []
+    fileLog.write('Installer::process() argv:', process.argv.join(' '))
+    // override this method
+  }
+
+  /**
+   * @return {Object}
+   *   String task
+   *   Array<String> args
+   */
+  parseArguments() {
+    let task = null, args = []
     for (let i = 1; i < process.argv.length; i++) {
       let a = process.argv[i]
       if (!a.startsWith(INSTALLER_PREFIX)) continue
 
       task = a.substr(INSTALLER_PREFIX.length)
-      if (INSTALLER_TASK_ARGS_COUNT[task] === undefined) continue
+      if (this.taskArgsCount[task] === undefined) continue
 
-      let argsCount = INSTALLER_TASK_ARGS_COUNT[task]
+      let argsCount = this.taskArgsCount[task]
       if (argsCount) {
-        taskArgs = process.argv.slice(i+1, i+1+argsCount)
+        args = process.argv.slice(i+1, i+1+argsCount)
       }
       break
     }
 
-    if (task === null) {
-      return false
-    }
-
-    fileLog.write('Installer.process() argv:', process.argv.join(' '))
-
-    switch (task) {
-      case 'install': {
-        let [ dst, exeName ] = taskArgs
-        let src = path.dirname(process.execPath)
-
-        try {
-          this._install(src, dst, exeName)
-        } catch (e) {
-          fileLog.write(e)
-        }
-        return true
-      }
-
-      case 'post-install': {
-        this._postInstall(taskArgs[0])
-        if (parseInt(taskArgs[1]) == 0) {
-          this.copyFailed = true
-        }
-        break
-      }
-    }
+    return { task, args }
   }
 
-  _install(src, dst, exeName) {
-    fileLog.write('Installer._install()', src, dst)
+  launchApp() {
+    this.emit('done')
+    // override this method
+  }
+}
+
+class WindowsInstaller extends Installer {
+  constructor() {
+    super()
+    this.sysPath = require('get-system32-path').GetSystem32Path()
+    this.taskArgsCount = {
+      'install': 2,
+      'post-install': 2
+    }
 
     process.on('uncaughtException', (err) => {
       fileLog.write(err)
       app.exit()
     })
-
-    let copyOk = true
-
-    this._copy(src, dst, exeName)
-    .then(result => {
-      copyOk = result
-    })
-    .then(() => this._clearIconCache())
-    .then(() => this._launchApp(path.join(dst, exeName), src, copyOk))
-    .catch(e => {
-      fileLog.write(e)
-      app.exit()
-    })
   }
 
-  _copy(src, dst, exeName) {
-    process.noAsar = true
+  process() {
+    super.process()
 
+    let { task, args } = this.parseArguments()
+    if (!task) {
+      return false
+    }
+
+    switch (task) {
+      case 'install': {
+        let [ dst, exeName ] = args
+        let src = path.dirname(process.execPath)
+
+        let noAsar = process.noAsar
+        process.noAsar = true
+        this.copy(src, dst, exeName)
+        .then(() => {
+          process.noAsar = noAsar
+        })
+        .then(() => this.clearIconCache())
+        .then(() => this.launchApp(path.join(dst, exeName), src))
+        .catch(e => {
+          fileLog.write(e)
+          app.exit()
+        })
+        return true
+      }
+
+      case 'post-install': {
+        let [ dir, copyResult ] = args
+        this.copyFailed = parseInt(copyResult, 10) == 0
+
+        let noAsar = process.noAsar
+        process.noAsar = true
+        fs.remove(dir, function(err) {
+          process.noAsar = noAsar
+          if (!err) {
+            fileLog.write('WindowsInstaller::postInstall() done')
+          } else {
+            fileLog.write('WindowsInstaller::postInstall() error while deleting ' + dir + ':', err)
+          }
+        })
+        break
+      }
+    }
+  }
+
+  copy(src, dst, exeName) {
     const maxTries = 20
     function tryToCopy(iter = 0) {
       return pcopy(path.join(src, exeName), path.join(dst, exeName))
       .then(() => {
-        fileLog.write('_copy exe: succeeded on iteration ' + iter)
-        return true
+        fileLog.write('WindowsInstaller::copy() exe: succeeded on iteration ' + iter)
       })
       .catch(err => {
-        fileLog.write('_copy exe: failed on iteration ' + iter)
+        fileLog.write('WindowsInstaller::copy() exe: failed on iteration ' + iter)
         if (iter < maxTries) {
           return psleep(250).then(() => tryToCopy(iter+1))
         } else {
@@ -273,25 +320,18 @@ class Installer extends EventEmitter {
         return !path.endsWith(exeName)
       }
     }))
-    .then(() => true)
     .catch(err => {
-      fileLog.write('Installer._copy("' + src + '", "' + dst + '") failed:', err)
-      return false
+      fileLog.write('WindowsInstaller::copy("' + src + '", "' + dst + '") failed:', err)
+      this.copyFailed = true
     })
   }
 
-  _clearIconCache() {
-    const sysRoot = GetSystem32Path()
-    return pexecute(path.join(sysRoot, 'ie4uinit.exe'), ['-ClearIconCache'])
-      .then(() => pexecute(path.join(sysRoot, 'ie4uinit.exe'), ['-show']))
-  }
+  launchApp(exe, tempDir) {
+    super.launchApp()
+    fileLog.write('WindowsInstaller::launchApp() path:', exe)
 
-  _launchApp(exe, tempDir, success) {
-    this.emit('done')
-
-    fileLog.write('Installer._launchApp() path:', exe)
-
-    child_process.spawn(exe, ['--ewu-post-install', path.resolve(tempDir), success ? '1' : '0'], {
+    let success = !this.copyFailed
+    child_process.spawn(exe, ['--ewu-post-install', path.resolve(tempDir), (success ? '1' : '0')], {
       detached: true,
       stdio: ['ignore', 'ignore', 'ignore']
     }).unref()
@@ -299,17 +339,75 @@ class Installer extends EventEmitter {
     app.exit()
   }
 
-  _postInstall(dir) {
-    let noAsar = process.noAsar
-    process.noAsar = true
-    fs.remove(dir, function(err) {
-      process.noAsar = noAsar
-      if (!err) {
-        fileLog.write('Installer._postInstall() done')
-      } else {
-        fileLog.write('Installer._postInstall() error while deleting ' + dir + ':', err)
+  clearIconCache() {
+    return pexecute(path.join(this.sysRoot, 'ie4uinit.exe'), ['-ClearIconCache'])
+      .then(() => pexecute(path.join(this.sysRoot, 'ie4uinit.exe'), ['-show']))
+  }
+}
+
+class LinuxInstaller extends Installer {
+  constructor() {
+    super()
+    this.taskArgsCount = {
+      'install': 1,
+      'post-install': 1
+    }
+  }
+
+  process() {
+    super.process()
+
+    let { task, args } = this.parseArguments()
+    if (!task) {
+      return false
+    }
+
+    switch (task) {
+      case 'install': {
+        let src = args[0]
+        dst = path.dirname(process.execPath)
+
+        let noAsar = process.noAsar
+        process.noAsar = true
+        this.copy(src, dst, exeName)
+        .then(() => premove(src))
+        .then(() => {
+          process.noAsar = noAsar
+          return this.launchApp()
+        })
+        .catch(e => {
+          fileLog.write(e)
+          app.exit()
+        })
+        return true
       }
+
+      case 'post-install': {
+        let copyResult = args[0]
+        this.copyFailed = parseInt(copyResult, 10) == 0
+        break
+      }
+    }
+  }
+
+  copy(src, dst, exeName) {
+    return pcopy(src, dst)
+    .catch(err => {
+      fileLog.write('LinuxInstaller::copy("' + src + '", "' + dst + '") failed:', err)
+      this.copyFailed = true
     })
+  }
+
+  launchApp() {
+    super.launchApp()
+    fileLog.write('LinuxInstaller::launchApp()')
+
+    child_process.spawn(process.execPath, ['--ewu-post-install', (this.copyFailed ? '0' : '1')], {
+      detached: true,
+      stdio: ['ignore', 'ignore', 'ignore']
+    }).unref()
+
+    app.exit()
   }
 }
 
@@ -416,6 +514,14 @@ function pcopy(src, dst, opts = {}) {
   })
 }
 
+function premove(dir) {
+  return new Promise(function(resolve, reject) {
+    fs.remove(dir, function(err) {
+      !err ? resolve() : reject(err)
+    })
+  })
+}
+
 function psleep(timeout) {
   return new Promise(function(resolve, reject) {
     setTimeout(function() {
@@ -463,12 +569,22 @@ class FileLog {
   }
 }
 
-const fileLog = new FileLog()
+let updater, installer, fileLog = new FileLog()
+switch (process.platform) {
+  case 'linux':
+    updater = new LinuxUpdater()
+    installer = new LinuxInstaller()
+    break
 
+  case 'win32':
+    updater = new WindowsUpdater()
+    installer = new WindowsInstaller()
+    break
+}
 
 module.exports = {
-  updater: new Updater(),
-  installer: new Installer(),
+  updater,
+  installer,
 
   /**
    * @param {String} s
