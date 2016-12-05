@@ -22,7 +22,6 @@ class Updater extends EventEmitter {
     this.updateData = null
     this.unpackDir = null
     this.allowHttp = false
-    this.exeName = null
   }
 
   /**
@@ -30,13 +29,6 @@ class Updater extends EventEmitter {
    */
   setFeedURL(url) {
     this.feedURL = url
-  }
-
-  /**
-   * @param {String} name
-   */
-  setExecutableName(name) {
-    this.exeName = name
   }
 
   quitAndInstall() {
@@ -152,6 +144,14 @@ class WindowsUpdater extends Updater {
   constructor() {
     super()
     this.cscriptPath = path.join(require('get-system32-path').GetSystem32Path(), 'cscript.exe')
+    this.exeName = null
+  }
+
+  /**
+   * @param {String} name
+   */
+  setExecutableName(name) {
+    this.exeName = name
   }
 
   quitAndInstall() {
@@ -238,7 +238,7 @@ class Installer extends EventEmitter {
 class WindowsInstaller extends Installer {
   constructor() {
     super()
-    this.sysPath = require('get-system32-path').GetSystem32Path()
+    this.sysRoot = require('get-system32-path').GetSystem32Path()
     this.taskArgsCount = {
       'install': 2,
       'post-install': 2
