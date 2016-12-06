@@ -1,5 +1,3 @@
-'use strict'
-
 const app = require('electron').app
 const temp = require('temp')
 const os = require('os')
@@ -12,6 +10,8 @@ const parseUrl = require('url').parse
 const child_process = require('child_process')
 const extractZip = require('extract-zip')
 const util = require('util')
+
+const NOOP = function() {}
 
 class Updater extends EventEmitter {
   constructor() {
@@ -65,20 +65,20 @@ class Updater extends EventEmitter {
       // Download
       this.downloadPath = temp.path({ suffix: '.zip' })
       this.downloading = true
-      _log('downloading ' + this.updateData.url + ' to ' + this.downloadPath)
+      //_log('downloading ' + this.updateData.url + ' to ' + this.downloadPath)
       return this._download(this.updateData.url, this.downloadPath)
     })
     .then(() => {
       return mkTempDir()
       .then(dir => {
-        _log('unpacking to ' + dir)
+        //_log('unpacking to ' + dir)
         this.unpackDir = dir
         return pExtractZip(this.downloadPath, dir)
       })
     })
     .then(() => punlink(this.downloadPath, true))
     .then(() => {
-      _log('an update has been successfully downloaded and unpacked')
+      //_log('an update has been successfully downloaded and unpacked')
       this.emit('update-downloaded', this.updateData)
     })
     .catch(e => {
@@ -99,17 +99,25 @@ class Updater extends EventEmitter {
   _download(src, dst) {
     const PROGRESS_PERIOD = 500
     return new Promise((resolve, reject) => {
-      let module = parseUrl(src).protocol == 'https:' ? https : http
-      let request = module.get(src, response => {
+      let p = parseUrl(src)
+      let module = ( p.protocol == 'https:' ? https : http )
+
+      let request = module.request({
+        method: 'GET',
+        host: p.host,
+        path: p.path
+      })
+
+      request.on('response', (response) => {
         if (response.statusCode != 200) {
           reject(new Error("HTTP status code is " + response.statusCode))
           return
         }
 
-        let file = fs.createWriteStream(dst)
         let downloaded = 0
         let progressTs = 0
 
+        let file = fs.createWriteStream(dst)
         response.pipe(file)
 
         file.on('finish', () => {
@@ -133,9 +141,13 @@ class Updater extends EventEmitter {
       })
 
       request.on('error', function(error) {
-        fs.unlink(dst)
-        reject(error)
+        file.close(function() {
+          fs.unlink(dst)
+          reject(error)
+        })
       })
+
+      request.end()
     })
   }
 }
@@ -201,7 +213,6 @@ class Installer extends EventEmitter {
   }
 
   process() {
-    fileLog.write('Installer::process() argv:', process.argv.join(' '))
     // override this method
   }
 
@@ -257,6 +268,8 @@ class WindowsInstaller extends Installer {
     if (!task) {
       return false
     }
+
+    fileLog.write('WindowsInstaller::process() argv:', process.argv.join(' '))
 
     switch (task) {
       case 'install': {
@@ -354,22 +367,43 @@ class LinuxInstaller extends Installer {
     }
   }
 
-  process() {
+  process(opts = {}) {
     super.process()
+
+    const defaultOpts = {
+      afterCopy: NOOP
+    }
+    opts = Object.assign(defaultOpts, opts)
 
     let { task, args } = this.parseArguments()
     if (!task) {
       return false
     }
 
+    fileLog.write('LinuxInstaller::process() argv:', process.argv.join(' '))
+
     switch (task) {
       case 'install': {
         let src = args[0]
-        dst = path.dirname(process.execPath)
+        let dst = path.dirname(process.execPath)
 
         let noAsar = process.noAsar
         process.noAsar = true
-        this.copy(src, dst, exeName)
+        this.copy(src, dst)
+        .then(() => {
+          let res
+          try {
+            res = opts.afterCopy(src)
+          } catch (e) {
+            fileLog.write(e)
+          }
+
+          if (res instanceof Promise) {
+            return res.catch(err => {
+              fileLog.write(err)
+            })
+          }
+        })
         .then(() => premove(src))
         .then(() => {
           process.noAsar = noAsar
@@ -390,7 +424,7 @@ class LinuxInstaller extends Installer {
     }
   }
 
-  copy(src, dst, exeName) {
+  copy(src, dst) {
     return pcopy(src, dst)
     .catch(err => {
       fileLog.write('LinuxInstaller::copy("' + src + '", "' + dst + '") failed:', err)
@@ -467,7 +501,7 @@ function request(url) {
     let req = module.request({
       method: 'GET',
       host: p.host,
-      path: p.path
+      path: p.path,
     })
 
     req.on('response', function(res) {
@@ -483,10 +517,12 @@ function request(url) {
         chunks = undefined
       })
     })
-    req.end()
+
     req.on('error', function(error) {
       reject(error)
     })
+
+    req.end()
   })
 }
 
