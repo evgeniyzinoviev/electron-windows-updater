@@ -183,8 +183,7 @@ class WindowsUpdater extends Updater {
       stdio: ['ignore', 'ignore', 'ignore']
     }).unref()
 
-    app.exit(0)
-    process.exit(0)
+    app.exit()
   }
 }
 
@@ -202,8 +201,7 @@ class LinuxUpdater extends Updater {
       stdio: ['ignore', 'ignore', 'ignore']
     }).unref()
 
-    app.exit(0)
-    process.exit(0)
+    app.exit()
   }
 }
 
@@ -259,8 +257,7 @@ class WindowsInstaller extends Installer {
 
     process.on('uncaughtException', (err) => {
       fileLog.write(err)
-      app.exit(0)
-      process.exit(0)
+      app.exit()
     })
   }
 
@@ -289,8 +286,7 @@ class WindowsInstaller extends Installer {
         .then(() => this.launchApp(path.join(dst, exeName), src))
         .catch(e => {
           fileLog.write(e)
-          app.exit(0)
-          process.exit(0)
+          app.exit()
         })
         return true
       }
@@ -353,8 +349,7 @@ class WindowsInstaller extends Installer {
       stdio: ['ignore', 'ignore', 'ignore']
     }).unref()
 
-    app.exit(0)
-    process.exit(0)
+    app.exit()
   }
 
   clearIconCache() {
@@ -416,8 +411,7 @@ class LinuxInstaller extends Installer {
         })
         .catch(e => {
           fileLog.write(e)
-          app.exit(0)
-          process.exit(0)
+          app.exit()
         })
         return true
       }
@@ -447,8 +441,7 @@ class LinuxInstaller extends Installer {
       stdio: ['ignore', 'ignore', 'ignore']
     }).unref()
 
-    app.exit(0)
-    process.exit(0)
+    app.exit()
   }
 }
 
