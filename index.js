@@ -324,7 +324,7 @@ class WindowsInstaller extends Installer {
       .catch(err => {
         fileLog.write('WindowsInstaller::copy(): failed on iteration ' + iter)
         if (iter < maxTries) {
-          return psleep(250).then(() => tryToCopy(iter+1))
+          return psleep(1000).then(() => tryToCopy(iter+1))
         } else {
           throw err
         }
