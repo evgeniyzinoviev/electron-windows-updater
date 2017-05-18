@@ -317,12 +317,12 @@ class WindowsInstaller extends Installer {
   copy(src, dst, exeName) {
     const maxTries = 20
     function tryToCopy(iter = 0) {
-      return pcopy(path.join(src, exeName), path.join(dst, exeName))
+      return pcopy(src, dst)
       .then(() => {
-        fileLog.write('WindowsInstaller::copy() exe: succeeded on iteration ' + iter)
+        fileLog.write('WindowsInstaller::copy(): succeeded on iteration ' + iter)
       })
       .catch(err => {
-        fileLog.write('WindowsInstaller::copy() exe: failed on iteration ' + iter)
+        fileLog.write('WindowsInstaller::copy(): failed on iteration ' + iter)
         if (iter < maxTries) {
           return psleep(250).then(() => tryToCopy(iter+1))
         } else {
@@ -332,11 +332,6 @@ class WindowsInstaller extends Installer {
     }
 
     return tryToCopy()
-    .then(() => pcopy(src, dst, {
-      filter: function(path) {
-        return !path.endsWith(exeName)
-      }
-    }))
     .catch(err => {
       fileLog.write('WindowsInstaller::copy("' + src + '", "' + dst + '") failed:', err)
       this.copyFailed = true
