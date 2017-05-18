@@ -315,7 +315,7 @@ class WindowsInstaller extends Installer {
   }
 
   copy(src, dst, exeName) {
-    const maxTries = 20
+    const maxTries = 45
     function tryToCopy(iter = 0) {
       return pcopy(src, dst)
       .then(() => {
