@@ -343,7 +343,7 @@ class WindowsInstaller extends Installer {
         let src = path.dirname(process.execPath)
 
         if (!isAdmin && needToBeAdmin) {
-          // used refused to elevate privielges
+          // user refused to elevate privielges
           fileLog.write('WindowsInstaller::install(): user must be an admin and it isn\'t; relaunching the app without continuing')
 
           alert("Error", "Admin rights are needed to install the update. Restarting.")
