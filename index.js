@@ -400,7 +400,7 @@ class WindowsInstaller extends Installer {
     .catch(err => {
       fileLog.write('WindowsInstaller::copy("' + src + '", "' + dst + '") failed:', err)
       this.copyFailed = true
-      return alert("Error", "Can't install the update:" + error)
+      return alert("Error", "Can't install the update:" + err)
     })
   }
 
