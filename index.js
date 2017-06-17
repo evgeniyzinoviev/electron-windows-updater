@@ -1,4 +1,4 @@
-const app = require('electron').app
+const { app, dialog } = require('electron')
 const temp = require('temp')
 const os = require('os')
 const fs = require('fs-extra')
@@ -10,8 +10,20 @@ const parseUrl = require('url').parse
 const child_process = require('child_process')
 const extractZip = require('extract-zip')
 const util = require('util')
+const winutils = require('winutils')
 
 const NOOP = function() {}
+
+let noAsarValue = false
+
+function asarOff() {
+  noAsarValue = process.noAsar
+  process.noAsar = true
+}
+
+function asarBack() {
+  process.noAsar = noAsarValue
+}
 
 class Updater extends EventEmitter {
   constructor() {
@@ -155,7 +167,6 @@ class Updater extends EventEmitter {
 class WindowsUpdater extends Updater {
   constructor() {
     super()
-    this.cscriptPath = path.join(require('get-system32-path').GetSystem32Path(), 'cscript.exe')
     this.exeName = null
   }
 
@@ -167,24 +178,62 @@ class WindowsUpdater extends Updater {
   }
 
   quitAndInstall() {
-    let script = path.join(__dirname, 'run-elevated.vbs')
-
-    let args = [
-      script,
-      path.join(this.unpackDir, this.exeName), // new exe path
-      path.dirname(process.execPath), // destination dir
-      this.exeName // executable to run after install
+    let installDstDir = path.dirname(process.execPath)
+    let needToElevate = false
+    let isAdmin = winutils.isUserAdmin()
+    let args = ['--disable-gpu',
+      '--ewu-install', installDstDir, this.exeName,
+      isAdmin ? 1 : 0,
+      process.argv.includes('--disable-gpu') ? 1 : 0, // needToDisableGpu
     ]
 
-    fileLog.write('WindowsUpdater::quitAndInstall() running ' + this.cscriptPath + ' ' + args.join(' '))
+    isWritable(path.join(path.dirname(installDstDir), randstr()))
+    .then(writable => {
+      fileLog.write('WindowsUpdater::quitAndInstall() directory ' + installDstDir + ' is not writable, need to elevate privileges')
+      needToElevate = !writable
+      args.push(needToElevate ? 1 : 0)
+    })
+    .then(() => {
+      let cmd = path.join(this.unpackDir, this.exeName)
+      if (needToElevate) {
+        runElevated(cmd, args)
+      } else {
+        run(cmd, args)
+      }
+      kill()
+    })
+  }
+}
 
-    child_process.spawn(this.cscriptPath, args, {
-      detached: true,
-      stdio: ['ignore', 'ignore', 'ignore']
-    }).unref()
+class SelfUpdater extends WindowsUpdater {
+  constructor() {
+    super()
+    this.updateData = {
+      "build": 100,
+      "name": "Version 1.0.0-fake (100)",
+      "notes": "blah-blah",
+      "pub_date": "2016-10-16T15:07:03+02:00",
+      "size": 50000000,
+      "version": "1.0.0"
+    }
+  }
 
-    app.exit(0)
-    process.exit(0)
+  checkForUpdates() {
+    let srcPath = path.dirname(process.execPath)
+
+    let tempName = temp.path()
+    this.unpackDir = tempName
+
+    pcopy(srcPath, tempName)
+    .then(() => {
+      this.emit('update-downloaded', this.updateData)
+    })
+    .catch(err => {
+      this.updateData = null
+      this.unpackDir = null
+      console.error('[SelfUpdater]', err)
+      this.emit('error', err)
+    })
   }
 }
 
@@ -193,6 +242,7 @@ class LinuxUpdater extends Updater {
     let args = [
       '--ewu-install',
       this.unpackDir, // source dir
+      process.argv.includes('--disable-gpu') ? 1 : 0, // needToDisableGpu
     ]
 
     fileLog.write('LinuxUpdater::quitAndInstall() running ' + process.execPath + ' ' + args.join(' '))
@@ -202,8 +252,6 @@ class LinuxUpdater extends Updater {
       stdio: ['ignore', 'ignore', 'ignore']
     }).unref()
 
-    app.exit(0)
-    process.exit(0)
   }
 }
 
@@ -235,6 +283,11 @@ class Installer extends EventEmitter {
       let argsCount = this.taskArgsCount[task]
       if (argsCount) {
         args = process.argv.slice(i+1, i+1+argsCount)
+        if (args.length < argsCount) {
+          for (let i = 0; i < argsCount < args.length; i++) {
+            args.push(null)
+          }
+        }
       }
       break
     }
@@ -251,16 +304,15 @@ class Installer extends EventEmitter {
 class WindowsInstaller extends Installer {
   constructor() {
     super()
-    this.sysRoot = require('get-system32-path').GetSystem32Path()
+    this.sysRoot = winutils.getSystem32Path()
     this.taskArgsCount = {
-      'install': 2,
+      'install': 5,
       'post-install': 2
     }
 
     process.on('uncaughtException', (err) => {
       fileLog.write(err)
-      app.exit(0)
-      process.exit(0)
+      kill()
     })
   }
 
@@ -276,22 +328,37 @@ class WindowsInstaller extends Installer {
 
     switch (task) {
       case 'install': {
-        let [ dst, exeName ] = args
+        let [ dst, exeName, wasAdmin, needToBeAdmin, needToDisableGpu ] = args
+
+        // transition from 1.3.0 to 1.4.0
+        if (wasAdmin === null) wasAdmin = 0
+        if (needToBeAdmin === null) needToBeAdmin = 1
+        if (needToDisableGpu === null) needToDisableGpu = 1
+
+        wasAdmin = !!parseInt(wasAdmin, 10)
+        needToBeAdmin = !!parseInt(needToBeAdmin, 10)
+        needToDisableGpu = !!parseInt(needToDisableGpu, 10)
+
+        let isAdmin = winutils.isUserAdmin()
         let src = path.dirname(process.execPath)
 
-        let noAsar = process.noAsar
-        process.noAsar = true
+        if (!isAdmin && needToBeAdmin) {
+          // used refused to elevate privielges
+          fileLog.write('WindowsInstaller::install(): user must be an admin and it isn\'t; relaunching the app without continuing')
+
+          alert("Error", "Admin rights are needed to install the update. Restarting.")
+          .then(() => this.launchApp(path.join(dst, exeName), src, !wasAdmin && isAdmin, needToDisableGpu))
+          return true
+        }
+
+        fileLog.write('WindowsInstaller::install() isAdmin:', isAdmin)
+
         this.copy(src, dst, exeName)
-        .then(() => {
-          process.noAsar = noAsar
-        })
         .then(() => this.clearIconCache())
-        .then(() => this.launchApp(path.join(dst, exeName), src))
         .catch(e => {
           fileLog.write(e)
-          app.exit(0)
-          process.exit(0)
         })
+        .then(() => this.launchApp(path.join(dst, exeName), src, !wasAdmin && isAdmin, needToDisableGpu))
         return true
       }
 
@@ -299,16 +366,14 @@ class WindowsInstaller extends Installer {
         let [ dir, copyResult ] = args
         this.copyFailed = parseInt(copyResult, 10) == 0
 
-        let noAsar = process.noAsar
-        process.noAsar = true
-        fs.remove(dir, function(err) {
-          process.noAsar = noAsar
-          if (!err) {
-            fileLog.write('WindowsInstaller::postInstall() done')
-          } else {
-            fileLog.write('WindowsInstaller::postInstall() error while deleting ' + dir + ':', err)
-          }
-        })
+        asarOff()
+        try {
+          fs.removeSync(dir)
+          fileLog.write('WindowsInstaller::postInstall() done')
+        } catch (e) {
+          fileLog.write('WindowsInstaller::postInstall() error while deleting ' + dir + ':', err)
+        }
+        asarBack()
         break
       }
     }
@@ -335,21 +400,27 @@ class WindowsInstaller extends Installer {
     .catch(err => {
       fileLog.write('WindowsInstaller::copy("' + src + '", "' + dst + '") failed:', err)
       this.copyFailed = true
+      return alert("Error", "Can't install the update:" + error)
     })
   }
 
-  launchApp(exe, tempDir) {
+  launchApp(exe, tempDir, needToDeelevate, needToDisableGpu) {
     super.launchApp()
-    fileLog.write('WindowsInstaller::launchApp() path:', exe)
+    fileLog.write('WindowsInstaller::launchApp() path:', exe, 'needToDeelevate:', needToDeelevate)
 
     let success = !this.copyFailed
-    child_process.spawn(exe, ['--ewu-post-install', path.resolve(tempDir), (success ? '1' : '0')], {
-      detached: true,
-      stdio: ['ignore', 'ignore', 'ignore']
-    }).unref()
+    let args = ['--ewu-post-install', path.resolve(tempDir), (success ? '1' : '0')]
+    if (needToDisableGpu) {
+      args.unshift('--disable-gpu')
+    }
 
-    app.exit(0)
-    process.exit(0)
+    if (needToDeelevate) {
+      runDeelevated(exe, args)
+    } else {
+      run(exe, args)
+    }
+
+    kill()
   }
 
   clearIconCache() {
@@ -362,7 +433,7 @@ class LinuxInstaller extends Installer {
   constructor() {
     super()
     this.taskArgsCount = {
-      'install': 1,
+      'install': 2,
       'post-install': 1
     }
   }
@@ -384,11 +455,9 @@ class LinuxInstaller extends Installer {
 
     switch (task) {
       case 'install': {
-        let src = args[0]
+        let [ src, needToDisableGpu ] = args
         let dst = path.dirname(process.execPath)
 
-        let noAsar = process.noAsar
-        process.noAsar = true
         this.copy(src, dst)
         .then(() => {
           let res
@@ -406,13 +475,11 @@ class LinuxInstaller extends Installer {
         })
         .then(() => premove(src))
         .then(() => {
-          process.noAsar = noAsar
-          return this.launchApp()
+          return this.launchApp(needToDisableGpu)
         })
         .catch(e => {
           fileLog.write(e)
-          app.exit(0)
-          process.exit(0)
+          kill()
         })
         return true
       }
@@ -433,17 +500,21 @@ class LinuxInstaller extends Installer {
     })
   }
 
-  launchApp() {
+  launchApp(needToDisableGpu) {
     super.launchApp()
     fileLog.write('LinuxInstaller::launchApp()')
 
-    child_process.spawn(process.execPath, ['--ewu-post-install', (this.copyFailed ? '0' : '1')], {
+    let args = ['--ewu-post-install', (this.copyFailed ? '0' : '1')]
+    if (needToDisableGpu) {
+      args.unshift('--disable-gpu')
+    }
+
+    child_process.spawn(process.execPath, args, {
       detached: true,
       stdio: ['ignore', 'ignore', 'ignore']
     }).unref()
 
-    app.exit(0)
-    process.exit(0)
+    kill()
   }
 }
 
@@ -455,10 +526,9 @@ class LinuxInstaller extends Installer {
 
 function pExtractZip(src, dst) {
   return new Promise(function(resolve, reject) {
-    let noAsar = process.noAsar
-    process.noAsar = true
+    asarOff()
     extractZip(src, { dir: dst }, function (err) {
-      process.noAsar = noAsar
+      asarBack()
       !err ? resolve() : reject(err)
     })
   })
@@ -530,31 +600,38 @@ function request(url) {
 
 function punlink(path, ignoreErrors = false) {
   return new Promise(function(resolve, reject) {
+    asarOff()
     fs.unlink(path, function(e) {
+      asarBack()
       e && !ignoreErrors ? reject(e) : resolve()
-    })
-  })
-}
-
-function pstat(path) {
-  return new Promise(function(resolve, reject) {
-    fs.stat(path, function(err, stats) {
-      err ? reject(err) : resolve(stats)
     })
   })
 }
 
 function pcopy(src, dst, opts = {}) {
   return new Promise(function(resolve, reject) {
+    asarOff()
     fs.copy(src, dst, opts, function(err) {
+      asarBack()
       !err ? resolve() : reject(err)
     })
   })
 }
 
+// function xcopy(src, dst) {
+//   let xcopyPath = path.join(winutils.getSystem32Path(), 'xcopy.exe')
+//   return pexecute(xcopyPath, ['/e', '/y', '/i', src, dst])
+//   .catch(err => {
+//     fileLog.write('xcopy("' + src + '", "' + dst + '") failed ('+xcopyPath+'):', err)
+//     throw err
+//   })
+// }
+
 function premove(dir) {
   return new Promise(function(resolve, reject) {
+    asarOff()
     fs.remove(dir, function(err) {
+      asarBack()
       !err ? resolve() : reject(err)
     })
   })
@@ -568,9 +645,84 @@ function psleep(timeout) {
   })
 }
 
+function isWritable(path) {
+  return new Promise(function(resolve, reject) {
+    asarOff()
+    fs.access(path, fs.W_OK, function(err) {
+      asarBack()
+      return !err ? resolve(true) : resolve(false)
+    })
+  })
+}
+
+function run(path, args) {
+  child_process.spawn(path, args, {
+    detached: true,
+    stdio: ['ignore', 'ignore', 'ignore']
+  }).unref()
+}
+
+function runElevated(path, args) {
+  log(path, args.map(s => winutils.escapeShellArg(s+'')).join(' '))
+  if (!winutils.elevate(path, args.map(s => winutils.escapeShellArg(s+'')).join(' '))) {
+    run(path, args)
+  }
+}
+
+function runDeelevated(path, args) {
+  try {
+    winutils.deelevate(path, args.map(s => winutils.escapeShellArg(s+'')).join(' '))
+    fileLog.write('[runDeelevated] seems ok')
+  } catch (e) {
+    fileLog.write('[runDeelevated] fallback to run()', e)
+    run(path, args)
+  }
+}
+
 function _log(...args) {
   args.unshift('<electron-windows-updater>')
   console.log.apply(console, args)
+}
+
+function randstr() {
+  let text = ''
+  let possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+
+  for (let i = 0; i < 10; i++) {
+    text += possible.charAt(Math.floor(Math.random() * possible.length))
+  }
+
+  return text
+}
+
+function alert(title, text) {
+  return new Promise(function(resolve, reject) {
+    try {
+      dialog.showMessageBox(null, {
+        type: 'error',
+        message: title,
+        detail: text,
+        buttons: ['OK'],
+        defaultId: 0,
+        noLink: true
+      }, function(id) {
+        resolve(id)
+      })
+    } catch (e) {
+      reject(e)
+    }
+  })
+}
+
+// please do not use win.destroy() and app.exit() and process.exit()
+// must exit gracefully with app.quit()
+function kill() {
+  //console.log('kill()')
+  fileLog.close(function() {
+    app.quit()
+    //app.exit(0)
+    //process.exit(0)
+  })
 }
 
 
@@ -586,7 +738,7 @@ class FileLog {
         let logpath = path.join(app.getPath('temp'), this.fileName)
         try {
           let stat = fs.statSync(logpath)
-          if (stat && stat.size > 102400) {
+          if (stat && stat.size > 1024000) {
             fs.unlinkSync(logpath)
           }
         } catch (e) {}
@@ -604,6 +756,14 @@ class FileLog {
 
   setFileName(n) {
     this.fileName = n
+  }
+
+  close(callback) {
+    if (this.stream) {
+      this.stream.end(callback)
+    } else {
+      callback()
+    }
   }
 }
 
@@ -623,6 +783,8 @@ switch (process.platform) {
 module.exports = {
   updater,
   installer,
+
+  SelfUpdater,
 
   /**
    * @param {String} s
