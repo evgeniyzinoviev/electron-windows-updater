@@ -10,7 +10,6 @@ const parseUrl = require('url').parse
 const child_process = require('child_process')
 const extractZip = require('extract-zip')
 const util = require('util')
-const winutils = require('winutils')
 
 const NOOP = function() {}
 
@@ -180,7 +179,7 @@ class WindowsUpdater extends Updater {
   quitAndInstall() {
     let installDstDir = path.dirname(process.execPath)
     let needToElevate = false
-    let isAdmin = winutils.isUserAdmin()
+    let isAdmin = require('winutils').isUserAdmin()
     let args = ['--disable-gpu',
       '--ewu-install', installDstDir, this.exeName,
       isAdmin ? 1 : 0,
@@ -304,7 +303,7 @@ class Installer extends EventEmitter {
 class WindowsInstaller extends Installer {
   constructor() {
     super()
-    this.sysRoot = winutils.getSystem32Path()
+    this.sysRoot = require('winutils').getSystem32Path()
     this.taskArgsCount = {
       'install': 5,
       'post-install': 2
@@ -339,7 +338,7 @@ class WindowsInstaller extends Installer {
         needToBeAdmin = !!parseInt(needToBeAdmin, 10)
         needToDisableGpu = !!parseInt(needToDisableGpu, 10)
 
-        let isAdmin = winutils.isUserAdmin()
+        let isAdmin = require('winutils').isUserAdmin()
         let src = path.dirname(process.execPath)
 
         if (!isAdmin && needToBeAdmin) {
@@ -618,15 +617,6 @@ function pcopy(src, dst, opts = {}) {
   })
 }
 
-// function xcopy(src, dst) {
-//   let xcopyPath = path.join(winutils.getSystem32Path(), 'xcopy.exe')
-//   return pexecute(xcopyPath, ['/e', '/y', '/i', src, dst])
-//   .catch(err => {
-//     fileLog.write('xcopy("' + src + '", "' + dst + '") failed ('+xcopyPath+'):', err)
-//     throw err
-//   })
-// }
-
 function premove(dir) {
   return new Promise(function(resolve, reject) {
     asarOff()
@@ -663,15 +653,14 @@ function run(path, args) {
 }
 
 function runElevated(path, args) {
-  log(path, args.map(s => winutils.escapeShellArg(s+'')).join(' '))
-  if (!winutils.elevate(path, args.map(s => winutils.escapeShellArg(s+'')).join(' '))) {
+  if (!require('winutils').elevate(path, args.map(s => require('winutils').escapeShellArg(s+'')).join(' '))) {
     run(path, args)
   }
 }
 
 function runDeelevated(path, args) {
   try {
-    winutils.deelevate(path, args.map(s => winutils.escapeShellArg(s+'')).join(' '))
+    require('winutils').deelevate(path, args.map(s => require('winutils').escapeShellArg(s+'')).join(' '))
     fileLog.write('[runDeelevated] seems ok')
   } catch (e) {
     fileLog.write('[runDeelevated] fallback to run()', e)
