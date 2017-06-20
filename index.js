@@ -251,6 +251,7 @@ class LinuxUpdater extends Updater {
       stdio: ['ignore', 'ignore', 'ignore']
     }).unref()
 
+    kill()
   }
 }
 
@@ -283,7 +284,7 @@ class Installer extends EventEmitter {
       if (argsCount) {
         args = process.argv.slice(i+1, i+1+argsCount)
         if (args.length < argsCount) {
-          for (let i = 0; i < argsCount - args.length; i++) {
+          for (let j = 0; j < argsCount - args.length; j++) {
             args.push(null)
           }
         }
