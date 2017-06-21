@@ -1,6 +1,6 @@
 {
   "name": "electron-windows-updater",
-  "version": "2.2.2",
+  "version": "2.2.3",
   "description": "implementation of auto-updater from osx for windows, used in vk messenger",
   "main": "index.js",
   "scripts": {
