@@ -370,7 +370,7 @@ class WindowsInstaller extends Installer {
         try {
           fs.removeSync(dir)
           fileLog.write('WindowsInstaller::postInstall() done')
-        } catch (e) {
+        } catch (err) {
           fileLog.write('WindowsInstaller::postInstall() error while deleting ' + dir + ':', err)
         }
         asarBack()
