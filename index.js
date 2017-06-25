@@ -609,13 +609,22 @@ function punlink(path, ignoreErrors = false) {
 }
 
 function pcopy(src, dst, opts = {}) {
-  return new Promise(function(resolve, reject) {
-    asarOff()
-    fs.copy(src, dst, opts, function(err) {
-      asarBack()
-      !err ? resolve() : reject(err)
-    })
-  })
+  asarOff()
+  try {
+    fs.copySync(src, dst)
+  } catch (e) {
+    asarBack()
+    return Promise.reject(e)
+  }
+  asarBack()
+  return Promise.resolve()
+
+//  return new Promise(function(resolve, reject) {
+//    fs.copy(src, dst, opts, function(err) {
+//      asarBack()
+//      !err ? resolve() : reject(err)
+//    })
+//  })
 }
 
 function premove(dir) {
