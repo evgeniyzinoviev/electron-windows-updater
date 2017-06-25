@@ -1,4 +1,4 @@
-const { app, dialog } = require('electron')
+const { app, dialog, BrowserWindow } = require('electron')
 const temp = require('temp')
 const os = require('os')
 const fs = require('fs-extra')
@@ -707,24 +707,24 @@ function alert(title, text) {
 // please do not use win.destroy() and app.exit() and process.exit()
 // must exit gracefully with app.quit()
 function kill() {
-  for (let win of BrowserWindow.getAllWindows()) {
-    if (win && !win.isDestroyed()) {
-      try {
-        win.removeAllListeners()
-        win.webContents.removeAllListeners()
-        win.webContents.session.webRequest.onHeadersReceived(null)
-      } catch (e) {
-        console.error(e)
-      }
-
-      try {
-        win.setClosable(true) // for nt7
-        win.close()
-      } catch (e) {
-        console.error(e)
-      }
-    }
-  }
+//   for (let win of BrowserWindow.getAllWindows()) {
+//     if (win && !win.isDestroyed()) {
+//       try {
+//         win.removeAllListeners()
+//         win.webContents.removeAllListeners()
+//         win.webContents.session.webRequest.onHeadersReceived(null)
+//       } catch (e) {
+//         console.error(e)
+//       }
+//
+//       try {
+//         win.setClosable(true) // for nt7
+//         win.close()
+//       } catch (e) {
+//         console.error(e)
+//       }
+//     }
+//   }
 
   //console.log('kill()')
   fileLog.close(function() {
