@@ -737,7 +737,7 @@ function kill() {
 
   //console.log('kill()')
   fileLog.close(function() {
-    app.quit()
+    app.exit()
     //app.exit(0)
     //process.exit(0)
   })
